@@ -1,0 +1,11 @@
+{
+  "appId": "cn.uppercrusteve.lottery",
+  "appName": "彩票记录",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": false
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

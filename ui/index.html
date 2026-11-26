@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0a0d14" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>彩票记录</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div class="aurora" aria-hidden="true">
+      <span class="blob blob-a"></span>
+      <span class="blob blob-b"></span>
+      <span class="blob blob-c"></span>
+    </div>
+
+    <header class="topbar glass">
+      <div class="topbar-row">
+        <h1>彩票记录</h1>
+        <button id="btn-settings" class="icon-btn" type="button" aria-label="设置">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              stroke-linecap="round"
+              d="M4 7h9m4 0h3M4 17h3m4 0h9M13 4v6M7 14v6"
+            />
+          </svg>
+        </button>
+      </div>
+      <div class="stats" id="stats">
+        <div class="stat"><b id="st-net">—</b><span>净额</span></div>
+        <div class="stat"><b id="st-won">—</b><span>中奖</span></div>
+        <div class="stat"><b id="st-spent">—</b><span>投入</span></div>
+        <div class="stat"><b id="st-pending">—</b><span>待开奖</span></div>
+      </div>
+    </header>
+
+    <main>
+      <section class="card glass" id="entry">
+        <div class="segmented" role="tablist" aria-label="彩种">
+          <button class="seg is-on" data-game="ssq" role="tab" aria-selected="true">双色球</button>
+          <button class="seg" data-game="dlt" role="tab" aria-selected="false">大乐透</button>
+        </div>
+
+        <label class="field">
+          <span class="label">购买日期</span>
+          <input id="in-date" type="date" value="" />
+        </label>
+
+        <div class="pick">
+          <div class="pick-head">
+            <span class="label" id="red-label">红球 <em>选 6</em></span>
+            <span class="counter" id="red-count">0 / 6</span>
+          </div>
+          <div class="grid" id="red-grid" role="group" aria-labelledby="red-label"></div>
+        </div>
+
+        <div class="pick">
+          <div class="pick-head">
+            <span class="label" id="blue-label">蓝球 <em>选 1</em></span>
+            <span class="counter" id="blue-count">0 / 1</span>
+          </div>
+          <div class="grid" id="blue-grid" role="group" aria-labelledby="blue-label"></div>
+        </div>
+
+        <div class="row2">
+          <label class="field">
+            <span class="label">金额（元）</span>
+            <input id="in-stake" type="number" inputmode="decimal" min="2" step="1" value="2" />
+          </label>
+          <label class="field">
+            <span class="label">倍数</span>
+            <input id="in-multiple" type="number" inputmode="numeric" min="1" step="1" value="1" />
+          </label>
+          <label class="field only-dlt" hidden>
+            <span class="label">追加</span>
+            <button id="btn-added" class="toggle" type="button" aria-pressed="false">关</button>
+          </label>
+        </div>
+
+        <div class="quick">
+          <button id="btn-random" class="ghost" type="button">机选</button>
+          <button id="btn-repeat" class="ghost" type="button">照上次</button>
+          <button id="btn-save" class="primary" type="button">记一笔</button>
+        </div>
+        <p class="hint" id="entry-hint"></p>
+      </section>
+
+      <section class="timeline" id="timeline" aria-label="记录"></section>
+      <div class="empty" id="empty" hidden>
+        <p>还没有记录。</p>
+        <p class="muted">上面选好号码点「记一笔」。开奖后这里会自动判奖。</p>
+      </div>
+    </main>
+
+    <div class="sheet-scrim" id="scrim" hidden></div>
+    <aside class="sheet glass" id="settings" hidden aria-label="设置">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <h2>连接数据仓</h2>
+      <p class="muted">
+        票单存在你自己的私有仓。token 只留本机，换机或疑似泄露就删掉重发。
+      </p>
+      <label class="field">
+        <span class="label">GitHub 账号</span>
+        <input id="in-owner" type="text" autocomplete="username" placeholder="uppercrusteve" />
+      </label>
+      <label class="field">
+        <span class="label">数据仓</span>
+        <input id="in-repo" type="text" placeholder="lottery-log-data" />
+      </label>
+      <label class="field">
+        <span class="label">Fine-grained PAT</span>
+        <input id="in-token" type="password" autocomplete="off" placeholder="github_pat_…" />
+      </label>
+      <div class="quick">
+        <button id="btn-connect" class="primary" type="button">保存并校验</button>
+        <button id="btn-clear" class="ghost" type="button">清除凭据</button>
+      </div>
+      <p class="hint" id="settings-hint"></p>
+      <p class="legal muted">
+        本工具只做记录与核对，不售彩。开奖数据来自中国福彩、中国体彩官方接口，判定结果仅供参考，以彩票实物和官方公告为准。
+      </p>
+    </aside>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

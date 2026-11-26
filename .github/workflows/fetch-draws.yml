@@ -1,0 +1,59 @@
+name: fetch-draws
+
+# 双色球 21:15、大乐透 21:25 开奖。21:45 抓一次，22:15 补一次防公告延迟。
+# 抓不到会写 pending，前端标"待补"，允许手填。
+on:
+  schedule:
+    - cron: '45 13 * * *'
+    - cron: '15 14 * * *'
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 指定日期 YYYY-MM-DD，留空取北京时间当天
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetch-draws
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 取代码
+        uses: actions/checkout@v4
+
+      - name: 取数据仓
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}-data
+          token: ${{ secrets.DATA_REPO_TOKEN }}
+          path: data
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 抓开奖
+        env:
+          OUT_DIR: data
+        run: node scripts/fetch-draws.mjs ${{ inputs.date }}
+
+      - name: 提交
+        working-directory: data
+        run: |
+          git config user.name 'lottery-log bot'
+          git config user.email 'bot@users.noreply.github.com'
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "没有变化，跳过"
+            exit 0
+          fi
+          git add -A
+          git commit -m "draws: $(date -u +%Y-%m-%d)"
+          # 默认分支上可能已有别的提交，rebase 后再推
+          git pull --rebase --autostash origin main
+          git push

@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - name: 代码风格
+        run: npx eslint .
+      - name: 单测
+        run: npx vitest run
+      - name: 构建
+        run: npm run build
+
+  # 抓取脚本写坏了不会有人发现，单独跑一次试运行
+  fetch-dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 抓取干跑（不推送）
+        run: node scripts/fetch-draws.mjs 2026-11-26 && test -s draws/2026-11-26.json

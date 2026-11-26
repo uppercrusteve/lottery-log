@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">彩票记录</string>
+    <string name="title_activity_main">彩票记录</string>
+    <string name="package_name">cn.uppercrusteve.lottery</string>
+    <string name="custom_url_scheme">cn.uppercrusteve.lottery</string>
+</resources>
