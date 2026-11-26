@@ -98,10 +98,78 @@ const splitNums = (s) =>
     .filter(Boolean)
     .map(Number);
 
+/** 从任意层级的响应里把带 matchId 的对象都抓出来，不依赖外层包装名 */
+function findMatches(node, out = []) {
+  if (!node || typeof node !== 'object') return out;
+  if (Array.isArray(node)) {
+    node.forEach((x) => findMatches(x, out));
+    return out;
+  }
+  if (node.matchId) out.push(node);
+  else Object.values(node).forEach((v) => findMatches(v, out));
+  return out;
+}
+
+/** "2:1" → [2, 1] */
+const parseScore = (s) => {
+  const [h, a] = splitNums(s);
+  return h == null || a == null ? [null, null] : [h, a];
+};
+
+/**
+ * 竞彩赛果。只收当天已结算（matchResultStatus 2）的场次，其余不写。
+ * 比分拆成数值存，让结算层不碰字符串。
+ */
+async function fetchJc(kind) {
+  const url =
+    `https://webapi.sporttery.cn/gateway/uniform/${kind}/getUniformMatchResultV1.qry` +
+    `?matchPage=0&pageSize=100&matchBeginDate=${date}&matchEndDate=${date}`;
+  const list = findMatches(JSON.parse(await get(url, { Referer: 'https://www.sporttery.cn/' })))
+    .filter((m) => String(m.matchDate ?? '').slice(0, 10) === date)
+    .filter((m) => String(m.matchResultStatus) === '2');
+
+  if (!list.length) throw new Error('该日期没有已结算场次');
+
+  const results = {};
+  for (const m of list) {
+    const [home, away] = parseScore(kind === 'basketball' ? m.finalScore : m.sectionsNo999);
+    if (home == null) continue;
+    const [halfHome, halfAway] = parseScore(m.sectionsNo1);
+    results[String(m.matchId)] = {
+      matchId: String(m.matchId),
+      matchNum: m.matchNumStr ?? m.matchNum,
+      league: m.leagueName ?? m.leagueAbbName,
+      homeTeam: m.homeTeam,
+      awayTeam: m.awayTeam,
+      home,
+      away,
+      halfHome,
+      halfAway,
+      line: Number(m.goalLine ?? m.goalline ?? 0),
+      status: 'final',
+    };
+  }
+
+  if (!Object.keys(results).length) throw new Error('有场次但比分都解析不出来');
+
+  return {
+    game: kind === 'basketball' ? 'jcb' : 'jcf',
+    date,
+    status: 'ok',
+    results,
+    source: url,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
 async function main() {
   const due = [];
   if (SSQ_DAYS.includes(weekday)) due.push(['ssq', fetchSsq]);
   if (DLT_DAYS.includes(weekday)) due.push(['dlt', fetchDlt]);
+
+  // 竞彩每天都有，不按星期过滤
+  due.push(['jcf', () => fetchJc('football')]);
+  due.push(['jcb', () => fetchJc('basketball')]);
 
   if (!due.length) {
     console.log(`${date} 两种彩票都不开奖，跳过`);
@@ -113,7 +181,11 @@ async function main() {
     try {
       const d = await fetcher();
       draws.push(d);
-      console.log(`✓ ${game} ${d.issue ?? ''} ${d.red.join(' ')} + ${d.blue.join(' ')}`);
+      if (d.results) {
+        console.log(`✓ ${game} ${Object.keys(d.results).length} 场已结算`);
+      } else {
+        console.log(`✓ ${game} ${d.issue ?? ''} ${d.red.join(' ')} + ${d.blue.join(' ')}`);
+      }
     } catch (e) {
       draws.push({ game, date, status: 'pending', reason: e.message, fetchedAt: new Date().toISOString() });
       console.log(`✗ ${game}：${e.message}，记 pending`);
@@ -122,7 +194,7 @@ async function main() {
 
   const path = `${process.env.OUT_DIR ?? '.'}/draws/${date}.json`;
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify({ schema: 1, kind: 'draws', date, items: draws }, null, 2)}\n`, 'utf8');
+  writeFileSync(path, `${JSON.stringify({ schema: 2, kind: 'draws', date, items: draws }, null, 2)}\n`, 'utf8');
   console.log(`写入 ${path}`);
 }
 

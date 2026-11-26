@@ -8,7 +8,9 @@
 
 import * as ssq from './rules/ssq.js';
 import * as dlt from './rules/dlt.js';
-import { DLT_POOL_HIGH, ADD_PRICE } from './models.js';
+import { settleLeg } from './rules/jc.js';
+import { parlayAmount } from './rules/pass.js';
+import { DLT_POOL_HIGH, ADD_PRICE, kindOf } from './models.js';
 
 const RULES = { ssq, dlt };
 
@@ -18,6 +20,8 @@ const RULES = { ssq, dlt };
  * @returns {import('./models.js').Verdict}
  */
 export function evaluate(ticket, draw) {
+  if (kindOf(ticket) === 'parlay') return evaluateParlay(ticket, draw?.results);
+
   const base = { level: 0, amount: 0, redHit: 0, blueHit: 0, pending: false };
 
   if (!draw || draw.status !== 'ok') {
@@ -49,6 +53,41 @@ export function evaluate(ticket, draw) {
     amount: amount == null ? null : round2(amount * multiple),
     ...(amount == null ? { reason: '浮动奖，缺当期金额' } : {}),
   };
+}
+
+/**
+ * 竞彩过关判定。
+ *
+ * 任一场未结算就整票 pending——混合过关里不同组合依赖的场次不一样，
+ * 部分出结果时先算金额会让人误以为板上钉钉。
+ *
+ * @param {import('./models.js').Ticket} ticket
+ * @param {Record<string, object> | undefined} results matchId → 赛果
+ * @returns {import('./models.js').Verdict}
+ */
+export function evaluateParlay(ticket, results) {
+  const legs = ticket.legs ?? [];
+  const base = { level: 0, amount: 0, bets: 0, pending: false, legs: [] };
+
+  if (!legs.length) return { ...base, pending: true, reason: '票面没有场次' };
+
+  const table = results ?? {};
+  const settled = legs.map((leg) => settleLeg(leg, table[leg.matchId]));
+  const marks = legs.map((leg, i) => ({
+    matchId: leg.matchId,
+    market: leg.market,
+    selection: leg.selection,
+    hit: settled[i],
+  }));
+
+  if (settled.some((s) => s === 'pending')) {
+    return { ...base, pending: true, reason: '有场次未结算', legs: marks };
+  }
+
+  const hits = settled.map((s) => s === 'hit');
+  const { hits: bets, amount } = parlayAmount(legs, hits, ticket.passType, ticket.multiple ?? 1);
+
+  return { ...base, level: bets > 0 ? 1 : 0, bets, amount, pending: false, legs: marks };
 }
 
 /**
@@ -85,9 +124,10 @@ export function countHit(mine = [], drawn = []) {
   return mine.reduce((n, x) => n + (s.has(x) ? 1 : 0), 0);
 }
 
-/** 一张票的成本，含追加 */
+/** 一张票的成本：数字彩按单注价×倍数，竞彩 stake 就是整票面额 */
 export function costOf(ticket) {
   const multiple = ticket.multiple ?? 1;
+  if (ticket.kind === 'parlay') return ticket.stake || 0;
   return (ticket.stake || 2) * multiple + (ticket.added ? ADD_PRICE * multiple : 0);
 }
 

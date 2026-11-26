@@ -11,6 +11,7 @@
  *   writeTicketShard(date, text) → void
  *   readDrawShard(date)          → string | undefined
  *   writeDrawShard(date, text)   → void
+ *   readMatchShard(date)         → string | undefined  竞彩赛程，只有 Actions 写
  *
  * 刻意传文本而不是对象：分片格式由 core/codec 管，存储层不认识业务字段。
  *
@@ -19,13 +20,21 @@
  * @property {(date: string, text: string) => Promise<void>} writeTicketShard
  * @property {(date: string) => Promise<string | undefined>} readDrawShard
  * @property {(date: string, text: string) => Promise<void>} writeDrawShard
+ * @property {(date: string) => Promise<string | undefined>} readMatchShard
  * @property {() => Promise<string[]>} listTicketDates
  * @property {() => Promise<void>} [clear]
  */
 
 /** 检查一个对象像不像 TicketStore */
 export function assertStore(store) {
-  for (const m of ['readTicketShard', 'writeTicketShard', 'readDrawShard', 'writeDrawShard', 'listTicketDates']) {
+  for (const m of [
+    'readTicketShard',
+    'writeTicketShard',
+    'readDrawShard',
+    'writeDrawShard',
+    'readMatchShard',
+    'listTicketDates',
+  ]) {
     if (typeof store?.[m] !== 'function') throw new Error(`存储缺少方法 ${m}`);
   }
   return store;

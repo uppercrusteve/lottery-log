@@ -79,6 +79,37 @@ describe('记票', () => {
   });
 });
 
+describe('读取合并', () => {
+  it('远端多出来的票会并进时间线', async () => {
+    const { remote, repo } = setup();
+    await repo.addTicket(tick({ id: 'a' }));
+    // 另一台设备推到远端的票，本地没有
+    await remote.writeTicketShard(
+      '2026-11-24',
+      codec.writeTickets('2026-11-24', [tick({ id: 'b' })], []),
+    );
+    const rows = await repo.timeline();
+    expect(rows.map((r) => r.ticket.id).sort()).toEqual(['a', 'b']);
+  });
+
+  it('远端删过的票不会被本地复活', async () => {
+    const { remote, repo } = setup();
+    await repo.addTicket(tick({ id: 'a' }));
+    await remote.writeTicketShard('2026-11-24', codec.writeTickets('2026-11-24', [], ['a']));
+    expect(await repo.timeline()).toHaveLength(0);
+  });
+
+  it('远端读失败时退回本地，不抛', async () => {
+    const { remote, repo } = setup();
+    await repo.addTicket(tick({ id: 'a' }));
+    remote.readTicketShard = async () => {
+      throw new Error('网络断了');
+    };
+    const rows = await repo.timeline();
+    expect(rows).toHaveLength(1);
+  });
+});
+
 describe('时间线', () => {
   it('没开奖时标 pending', async () => {
     const { repo } = setup();

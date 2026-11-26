@@ -1,8 +1,9 @@
 node_modules/
 dist/
 
-# 本地调试抓的开奖，正式数据在数据仓
+# 本地调试抓的开奖与赛程，正式数据在数据仓
 draws/
+matches/
 
 # Android 构建产物与本机配置（工程本身要提交）
 android/local.properties

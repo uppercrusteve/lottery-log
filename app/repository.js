@@ -18,13 +18,34 @@ const MAX_PUSH_TRIES = 3;
  * @param {ReturnType<typeof import('../adapters/store/idb.js').outbox>} [deps.queue]
  */
 export function repository({ local, remote, queue }) {
+  /** 离线或接口抽风时当远端没有，别把整个刷新打挂 */
+  const tryRemote = async (fn) => {
+    try {
+      return await fn();
+    } catch {
+      return undefined;
+    }
+  };
+
   async function loadTickets(date) {
-    const text = (await local.readTicketShard(date)) ?? (await remote.readTicketShard(date));
+    const localText = await local.readTicketShard(date);
+    const remoteText = await tryRemote(() => remote.readTicketShard(date));
+    // 远端可能带着别处的改动，按 id 并集、removed 优先，本地同 id 覆盖
+    if (!remoteText) return codec.parseShard(localText).items;
+    const merged = codec.mergeShards(codec.parseShard(remoteText), codec.parseShard(localText));
+    return merged.items;
+  }
+
+  /** 赛程只由 Actions 写，本地只是缓存 */
+  async function loadMatches(date) {
+    const text =
+      (await tryRemote(() => remote.readMatchShard(date))) ?? (await local.readMatchShard(date));
     return codec.parseShard(text).items;
   }
 
   async function loadDraw(date) {
-    const text = (await remote.readDrawShard(date)) ?? (await local.readDrawShard(date));
+    const text =
+      (await tryRemote(() => remote.readDrawShard(date))) ?? (await local.readDrawShard(date));
     return codec.parseShard(text).items;
   }
 
@@ -123,7 +144,7 @@ export function repository({ local, remote, queue }) {
     return { ...s, spent, net: s.payout - spent };
   }
 
-  return { addTicket, removeTicket, timeline, stats, push, loadDraw };
+  return { addTicket, removeTicket, timeline, stats, push, loadDraw, loadMatches };
 }
 
 export const addDays = (date, n) => {

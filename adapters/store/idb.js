@@ -56,6 +56,9 @@ export function idbStore() {
     async writeTicketShard(date, text) {
       await put(`tickets/${date}.json`, text);
     },
+    async readMatchShard(date) {
+      return get(`matches/${date}.json`);
+    },
     async readDrawShard(date) {
       return get(`draws/${date}.json`);
     },

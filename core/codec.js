@@ -5,14 +5,19 @@
  * 分片而不是单文件，是为了两台手机改不同日期时不会互相覆盖。
  *
  * 迁移规则：schema 整数单调递增，read* 负责把老版本升到当前版本，
- * 不认识的更高版本直接报错，不猜。当前版本 1。
+ * 不认识的更高版本直接报错，不猜。当前版本 2（v2 加竞彩 legs）。
  */
 
 import * as ssq from './rules/ssq.js';
 import * as dlt from './rules/dlt.js';
+import { PASS_TYPES } from './rules/pass.js';
+import { marketsOf, needsLine } from './rules/jc.js';
+import { GAMES } from './models.js';
 
-export const SCHEMA = 1;
+export const SCHEMA = 2;
 const RULES = { ssq, dlt };
+
+export const isParlay = (t) => t?.kind === 'parlay' || Array.isArray(t?.legs);
 
 export const ticketPath = (date) => `tickets/${date}.json`;
 export const drawPath = (date) => `draws/${date}.json`;
@@ -27,9 +32,13 @@ const envelope = (kind, date, items, removed = []) => ({ schema: SCHEMA, kind, d
 export function validateTicket(t) {
   const errs = [];
   if (!t?.id) errs.push('缺 id');
-  if (!RULES[t?.game]) errs.push(`未知彩种：${t?.game}`);
+  if (!GAMES[t?.game]) errs.push(`未知彩种：${t?.game}`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(t?.date ?? '')) errs.push(`日期不是 YYYY-MM-DD：${t?.date}`);
-  if (RULES[t?.game] && !RULES[t.game].isValid(t)) errs.push('号码不合法');
+  if (isParlay(t)) {
+    errs.push(...validateParlay(t));
+  } else if (RULES[t?.game] && !RULES[t.game].isValid(t)) {
+    errs.push('号码不合法');
+  }
   if (!(typeof t?.stake === 'number' && t.stake > 0)) errs.push(`金额非法：${t?.stake}`);
   if (t?.multiple != null && !(Number.isInteger(t.multiple) && t.multiple >= 1)) {
     errs.push(`倍数非法：${t.multiple}`);
@@ -46,14 +55,72 @@ export const formatNumbers = (t) =>
 
 const pad2 = (n) => String(n).padStart(2, '0');
 
+/** 竞彩一场蒸成稳定形状 */
+function normalizeLeg(l) {
+  return {
+    matchId: String(l.matchId),
+    ...(l.matchNum ? { matchNum: String(l.matchNum) } : {}),
+    ...(l.league ? { league: String(l.league) } : {}),
+    ...(l.home ? { home: String(l.home) } : {}),
+    ...(l.away ? { away: String(l.away) } : {}),
+    market: String(l.market),
+    selection: String(l.selection),
+    ...(l.line != null ? { line: Number(l.line) } : {}),
+    sp: Number(l.sp),
+  };
+}
+
+/** 竞彩票的额外校验 */
+function validateParlay(t) {
+  const errs = [];
+  const legs = Array.isArray(t.legs) ? t.legs : [];
+  if (!legs.length) errs.push('竞彩票没有场次');
+
+  const markets = marketsOf(t.game);
+  const ids = new Set();
+  legs.forEach((l, i) => {
+    const at = `第 ${i + 1} 场`;
+    if (!l?.matchId) errs.push(`${at}缺 matchId`);
+    else if (ids.has(l.matchId)) errs.push(`${at} matchId 重复`);
+    else ids.add(l.matchId);
+    if (!markets.includes(l?.market)) errs.push(`${at} 玩法不属于 ${t.game}：${l?.market}`);
+    if (!l?.selection) errs.push(`${at} 缺选项`);
+    if (!(l?.sp > 1)) errs.push(`${at} 赔率非法：${l?.sp}`);
+    if (needsLine(l?.market) && !Number.isFinite(l?.line)) errs.push(`${at} 缺盘口`);
+    if (l?.market === 'rqspf' && !Number.isInteger(l?.line)) errs.push(`${at} 足球让球必须是整数`);
+  });
+
+  if (!PASS_TYPES[t.passType]) errs.push(`未知过关方式：${t.passType}`);
+  else if (PASS_TYPES[t.passType].some((m) => m > legs.length)) {
+    errs.push(`过关方式 ${t.passType} 需要至少 ${PASS_TYPES[t.passType][0]} 场，只有 ${legs.length} 场`);
+  }
+  return errs;
+}
+
 /** 把一张票据蒸成稳定形状，丢掉未知字段 */
 export function normalizeTicket(t) {
+  if (isParlay(t)) {
+    return {
+      id: String(t.id),
+      kind: 'parlay',
+      game: t.game,
+      date: t.date,
+      legs: (t.legs ?? []).map(normalizeLeg),
+      passType: t.passType,
+      stake: t.stake,
+      ...(t.multiple && t.multiple !== 1 ? { multiple: t.multiple } : {}),
+      ...(t.shop ? { shop: t.shop } : {}),
+      ...(t.note ? { note: t.note } : {}),
+      createdAt: t.createdAt ?? new Date().toISOString(),
+    };
+  }
   return {
     id: String(t.id),
+    kind: 'number',
     game: t.game,
     date: t.date,
-    red: [...t.red].sort((a, b) => a - b),
-    blue: [...t.blue].sort((a, b) => a - b),
+    red: [...(t.red ?? [])].sort((a, b) => a - b),
+    blue: [...(t.blue ?? [])].sort((a, b) => a - b),
     stake: t.stake,
     ...(t.added ? { added: true } : {}),
     ...(t.multiple && t.multiple !== 1 ? { multiple: t.multiple } : {}),
@@ -104,8 +171,15 @@ export function parseShard(text) {
   const removed = Array.isArray(raw.removed) ? raw.removed.map(String) : [];
   let items = Array.isArray(raw.items) ? raw.items : [];
   if (schema < 1) items = items.map(migrate0to1);
+  if (schema < 2) items = items.map(migrate1to2);
 
   return { schema, items, removed };
+}
+
+/** v1 → v2：旧票都是数字彩，补 kind。draws 分片没有 kind，靠 status 区分 */
+function migrate1to2(t) {
+  if (t?.kind || t?.status) return t;
+  return { ...t, kind: Array.isArray(t.legs) ? 'parlay' : 'number' };
 }
 
 /** v0（无 schema 字段，裸数组）→ v1 */

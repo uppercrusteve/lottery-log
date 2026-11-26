@@ -99,6 +99,9 @@ export function githubStore({ owner, repo, getToken, branch = 'main' }) {
       const path = `tickets/${date}.json`;
       await writeRaw(path, text, `tickets: ${date}`);
     },
+    async readMatchShard(date) {
+      return readRaw(`matches/${date}.json`);
+    },
     async readDrawShard(date) {
       return readRaw(`draws/${date}.json`);
     },

@@ -2,8 +2,10 @@ name: fetch-draws
 
 # 双色球 21:15、大乐透 21:25 开奖。21:45 抓一次，22:15 补一次防公告延迟。
 # 抓不到会写 pending，前端标"待补"，允许手填。
+# 竞彩赛果随同一趟抓；赛程另抓当日与次日，只作选场参考，赔率以票面为准。
 on:
   schedule:
+    - cron: '5 3 * * *'    # 北京 11:05，只为拿当天的在售赛程
     - cron: '45 13 * * *'
     - cron: '15 14 * * *'
   workflow_dispatch:
@@ -38,10 +40,17 @@ jobs:
         with:
           node-version: 22
 
+      # 上午那趟只为拿赛程，开奖还没开
       - name: 抓开奖
+        if: github.event.schedule != '5 3 * * *'
         env:
           OUT_DIR: data
         run: node scripts/fetch-draws.mjs ${{ inputs.date }}
+
+      - name: 抓赛程
+        env:
+          OUT_DIR: data
+        run: node scripts/fetch-matches.mjs ${{ inputs.date }}
 
       - name: 提交
         working-directory: data
@@ -53,7 +62,7 @@ jobs:
             exit 0
           fi
           git add -A
-          git commit -m "draws: $(date -u +%Y-%m-%d)"
+          git commit -m "draws+matches: $(date -u +%Y-%m-%d)"
           # 默认分支上可能已有别的提交，rebase 后再推
           git pull --rebase --autostash origin main
           git push
