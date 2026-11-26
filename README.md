@@ -5,7 +5,7 @@
 目前覆盖**双色球**和**大乐透**。竞彩足球/篮球在 [docs/竞彩数据源.md](docs/竞彩数据源.md) 里做完了数据源侦察，模型预留了 `kind: 'parlay'`，尚未实现。
 
 - Web：浏览器直接开，可装到桌面
-- Android：Capacitor 外壳，可自己打 debug apk 侧载
+- Android：已提供 [debug apk](https://github.com/uppercrusteve/lottery-log/releases/latest)，也可自己构建（Capacitor 外壳）
 - 不做 iOS（签名麻烦）
 
 ## 它做什么
