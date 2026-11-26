@@ -9,7 +9,9 @@ import { idbStore, outbox } from '../adapters/store/idb.js';
 import { memoryStore } from '../adapters/store/memory.js';
 import { githubStore } from '../adapters/store/github.js';
 import { creds } from '../adapters/creds.js';
-import { GAMES } from '../core/models.js';
+import { GAMES, kindOf } from '../core/models.js';
+import { MARKET_NAMES, BQC_CODES, SFC_BANDS, needsLine } from '../core/rules/jc.js';
+import { PASS_TYPES, betCount, expectedStake } from '../core/rules/pass.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -20,8 +22,11 @@ const state = {
   added: false,
   online: false,
   repo: null,
+  legs: [],
+  passType: '2x1',
 };
 
+const isParlay = () => GAMES[state.game]?.kind === 'parlay';
 const local = idbStore();
 const queue = outbox();
 let repo = repository({ local, remote: memoryStore(), queue });
@@ -49,6 +54,7 @@ const pad2 = (n) => String(n).padStart(2, '0');
 /** 按当前彩种渲染号码盘 */
 function renderGrids() {
   const g = GAMES[state.game];
+  if (g.kind === 'parlay') return;
   const isDlt = state.game === 'dlt';
   const redMax = isDlt ? g.frontMax : g.redMax;
   const blueMax = isDlt ? g.backMax : g.blueMax;
@@ -118,7 +124,24 @@ const hint = (msg, cls = '') => {
   el.className = `hint ${cls}`;
 };
 
+/** 数字彩与竞彩的输入区不共存 */
+function applyMode() {
+  const p = isParlay();
+  document.querySelectorAll('.only-number').forEach((el) => {
+    el.hidden = p;
+  });
+  document.querySelector('.only-parlay').hidden = !p;
+  document.querySelectorAll('.only-dlt').forEach((el) => {
+    el.hidden = p || state.game !== 'dlt';
+  });
+  $('#date-label').textContent = p ? '比赛日' : '购买日期';
+  $('#in-stake').readOnly = p;
+  if (p) renderJc();
+}
+
 async function save() {
+  if (isParlay()) return saveParlay();
+
   const g = GAMES[state.game];
   const isDlt = state.game === 'dlt';
   const needRed = isDlt ? g.frontCount : g.redCount;
@@ -174,10 +197,352 @@ function randomPick() {
   syncGrid('blue');
 }
 
+async function saveParlay() {
+  if (!state.legs.length) return jcHint('先选至少一场', 'err');
+  if (!PASS_TYPES[state.passType]) return jcHint('过关方式不对', 'err');
+
+  const multiple = Math.max(1, Number($('#jc-multiple').value) || 1);
+  const ticket = {
+    id: crypto.randomUUID(),
+    kind: 'parlay',
+    game: state.game,
+    date: $('#in-date').value || today(),
+    legs: state.legs.map((l) => ({ ...l })),
+    passType: state.passType,
+    stake: expectedStake(state.legs.length, state.passType, multiple),
+    multiple,
+    createdAt: new Date().toISOString(),
+  };
+
+  try {
+    const r = await repo.addTicket(ticket, { offline: !state.online });
+    if (!state.online) jcHint('记在本机了。接上数据仓后可同步', 'ok');
+    else jcHint(r.pushed ? '记下了，已推到数据仓' : `记在本机了（${r.reason}）`, r.pushed ? 'ok' : 'err');
+    state.legs = [];
+    renderJc();
+    await refresh();
+  } catch (e) {
+    jcHint(e.message, 'err');
+  }
+}
+
+/* ── 竞彩 ── */
+
+const PASS_CN = (p) => {
+  const [n, k] = p.split('x');
+  return k === '1' ? `${n} 串 1` : `${n} 串 ${k}`;
+};
+
+const signCn = (s) => ({ H: '胜', D: '平', A: '负' })[s] ?? s;
+
+const SEL_OPTIONS = {
+  spf: [
+    ['H', '主胜'],
+    ['D', '平'],
+    ['A', '客胜'],
+  ],
+  rqspf: [
+    ['H', '让球主胜'],
+    ['D', '让球平'],
+    ['A', '让球客胜'],
+  ],
+  bf: [
+    ...['1:0', '2:0', '2:1'].map((s) => [s, s]),
+    ...['3:0', '3:1', '3:2', '4:0', '4:1', '4:2', '5:0', '5:1', '5:2'].map((s) => [s, s]),
+    ['oH', '胜其他'],
+    ...['0:0', '1:1', '2:2', '3:3'].map((s) => [s, s]),
+    ['oD', '平其他'],
+    ...['0:1', '0:2', '1:2', '0:3', '1:3', '2:3'].map((s) => [s, s]),
+    ...['0:4', '1:4', '2:4', '0:5', '1:5', '2:5'].map((s) => [s, s]),
+    ['oA', '负其他'],
+  ],
+  jqs: [...Array(7)].map((_, i) => [String(i), `${i} 球`]).concat([['7p', '7 球及以上']]),
+  bqc: BQC_CODES.map((c) => [c, `${signCn(c[0])}${signCn(c[1])}`]),
+  sf: [
+    ['H', '主胜'],
+    ['A', '客胜'],
+  ],
+  rf: [
+    ['H', '主让胜'],
+    ['A', '客让胜'],
+  ],
+  dx: [
+    ['O', '大分'],
+    ['U', '小分'],
+  ],
+  sfc: ['H', 'A'].flatMap((w) => SFC_BANDS.map(([lo, hi, code]) => [w + code, `${w === 'H' ? '主胜' : '客胜'} ${lo}-${hi === Infinity ? '26+' : hi} 分`])),
+};
+
+const jcHint = (msg, cls = '') => {
+  const el = $('#jc-sum');
+  el.textContent = msg;
+  el.className = `hint ${cls}`;
+};
+
+/** 按场数重建过关方式下拉 */
+function renderPass() {
+  const sel = $('#jc-pass');
+  const n = state.legs.length;
+  const usable = Object.keys(PASS_TYPES).filter((p) => PASS_TYPES[p].includes(n));
+  sel.textContent = '';
+  for (const p of usable) {
+    const o = document.createElement('option');
+    o.value = p;
+    o.textContent = `${PASS_CN(p)}（${betCount(n, p)} 注）`;
+    sel.append(o);
+  }
+  if (!usable.includes(state.passType)) state.passType = usable[0] ?? '2x1';
+  sel.value = state.passType;
+  sel.disabled = !usable.length;
+}
+
+function renderJc() {
+  const box = $('#jc-legs');
+  box.textContent = '';
+  state.legs.forEach((leg, i) => {
+    const row = document.createElement('div');
+    row.className = 'jc-leg';
+
+    const main = document.createElement('div');
+    main.className = 'jc-leg-main';
+    const title = document.createElement('strong');
+    title.textContent = `${leg.matchNum || leg.matchId} ${leg.home} vs ${leg.away}`;
+    const detail = document.createElement('span');
+    detail.className = 'muted small';
+    detail.textContent = `${MARKET_NAMES[leg.market] ?? leg.market} ${leg.line != null ? leg.line : ''} ${selName(leg.market, leg.selection)} @${leg.sp}`;
+    main.append(title, detail);
+
+    const del = document.createElement('button');
+    del.className = 'link';
+    del.type = 'button';
+    del.textContent = '移除';
+    del.addEventListener('click', () => {
+      state.legs.splice(i, 1);
+      renderJc();
+    });
+
+    row.append(main, del);
+    box.append(row);
+  });
+
+  $('#jc-count').textContent = `${state.legs.length} 场`;
+  renderPass();
+
+  const multiple = Math.max(1, Number($('#jc-multiple').value) || 1);
+  const sum = expectedStake(state.legs.length, state.passType, multiple);
+  $('#in-stake').value = sum || 2;
+  jcHint(state.legs.length ? `共 ${betCount(state.legs.length, state.passType)} 注，面额 ${sum} 元` : '还没选场次');
+}
+
+/** 赛程抽屉 */
+const matchSheet = $('#match-sheet');
+
+async function openMatches(open) {
+  matchSheet.hidden = !open;
+  scrim.hidden = !open;
+  if (open) await renderMatches();
+}
+
+async function renderMatches() {
+  const list = $('#match-list');
+  const date = $('#in-date').value || today();
+  list.textContent = '';
+  $('#match-hint').textContent = '赛程由 Actions 每天抓，读的是数据仓里的备份。赔率会浮动，以票面为准。';
+
+  let groups = [];
+  try {
+    groups = await repo.loadMatches(date);
+  } catch (e) {
+    $('#match-hint').textContent = `读赛程失败：${e.message}`;
+    return;
+  }
+
+  const mine = groups.find((g) => g.game === state.game);
+  if (!mine || mine.status !== 'ok' || !mine.items?.length) {
+    $('#match-hint').textContent = mine?.reason
+      ? `没拉到赛程：${mine.reason}。可以手动补，或等下一次抓取。`
+      : `${date} 没有在售的${GAMES[state.game].name}场次。`;
+    return;
+  }
+
+  for (const m of mine.items) {
+    list.append(matchEl(m));
+  }
+}
+
+function matchEl(m) {
+  const card = document.createElement('div');
+  card.className = 'match';
+
+  const head = document.createElement('div');
+  head.className = 'match-head';
+  head.textContent = `${m.matchNum} ${m.league} · ${m.home} vs ${m.away} ${m.time}`;
+
+  const FIRST = ['spf', 'sf', 'rqspf', 'rf', 'bf', 'jqs', 'bqc', 'sfc', 'dx'];
+  const markets = Object.keys(m.odds ?? {})
+    .filter((k) => SEL_OPTIONS[k])
+    .sort((a, b) => FIRST.indexOf(a) - FIRST.indexOf(b));
+  const marketSel = document.createElement('select');
+  for (const k of markets) {
+    const o = document.createElement('option');
+    o.value = k;
+    o.textContent = MARKET_NAMES[k] ?? k;
+    marketSel.append(o);
+  }
+
+  const selSel = document.createElement('select');
+  const lineInput = document.createElement('input');
+  lineInput.type = 'number';
+  lineInput.step = '0.5';
+  lineInput.placeholder = '盘口';
+  lineInput.className = 'narrow';
+
+  const spInput = document.createElement('input');
+  spInput.type = 'number';
+  spInput.step = '0.01';
+  spInput.placeholder = '赔率';
+  spInput.className = 'narrow';
+
+  const fillSel = () => {
+    const market = marketSel.value;
+    const odds = m.odds?.[market] ?? {};
+    selSel.textContent = '';
+    for (const [code, name] of SEL_OPTIONS[market] ?? []) {
+      const o = document.createElement('option');
+      o.value = code;
+      o.textContent = name;
+      selSel.append(o);
+    }
+    lineInput.hidden = !needsLine(market);
+    lineInput.value = needsLine(market) ? (odds.line ?? '') : '';
+    fillSp(odds);
+  };
+
+  // 选中选项就把官方赔率填进赔率框，票面仍以用户改后的为准
+  const fillSp = (odds) => {
+    const sp = odds?.[selSel.value.toLowerCase()] ?? odds?.[selSel.value];
+    spInput.value = sp > 1 ? sp : '';
+  };
+
+  marketSel.addEventListener('change', () => fillSel());
+  selSel.addEventListener('change', () => fillSp(m.odds?.[marketSel.value]));
+  fillSel();
+
+  const add = document.createElement('button');
+  add.className = 'primary';
+  add.type = 'button';
+  add.textContent = '加';
+  add.addEventListener('click', () => {
+    const market = marketSel.value;
+    const sel = selSel.value;
+    const odds = m.odds?.[market] ?? {};
+    const sp = Number(spInput.value) || (sel === 'H' ? odds.h : sel === 'D' ? odds.d : odds.a);
+    if (!(sp > 1)) return jcHint('赔率要大于 1', 'err');
+
+    const line = needsLine(market) ? Number(lineInput.value) : undefined;
+    if (needsLine(market) && !Number.isFinite(line)) return jcHint('这场要填盘口', 'err');
+    if (market === 'rqspf' && !Number.isInteger(line)) return jcHint('足球让球必须是整数', 'err');
+
+    if (state.legs.some((l) => l.matchId === m.matchId)) return jcHint('这场已经选过了', 'err');
+
+    state.legs.push({
+      matchId: m.matchId,
+      matchNum: m.matchNum,
+      league: m.league,
+      home: m.home,
+      away: m.away,
+      market,
+      selection: sel,
+      ...(line != null ? { line } : {}),
+      sp,
+    });
+    openMatches(false);
+    renderJc();
+  });
+
+  card.append(head, marketSel, selSel, lineInput, spInput, add);
+  return card;
+}
+
 const LEVEL_NAME = { 1: '一等奖', 2: '二等奖', 3: '三等奖', 4: '四等奖', 5: '五等奖', 6: '六等奖', 7: '七等奖' };
+
+const selName = (market, code) =>
+  SEL_OPTIONS[market]?.find(([c]) => c === code)?.[1] ?? code;
+
+/** 竞彩票的展示。每场一行带命中标记，不染色球。 */
+function parlayEl(row) {
+  const { ticket: t, verdict: v, cost } = row;
+  const el = document.createElement('article');
+  el.className = `entry${v.level > 0 ? ' hit' : ''}`;
+
+  const top = document.createElement('div');
+  top.className = 'entry-top';
+  const meta = document.createElement('span');
+  meta.className = 'entry-date';
+  meta.textContent = `${GAMES[t.game]?.name ?? t.game} · ${t.date} · ${PASS_CN(t.passType)}${t.multiple > 1 ? ` · ${t.multiple} 倍` : ''}`;
+  const del = document.createElement('button');
+  del.className = 'del';
+  del.type = 'button';
+  del.textContent = '删除';
+  del.addEventListener('click', async () => {
+    await repo.removeTicket(t.id, t.date);
+    await refresh();
+  });
+  top.append(meta, del);
+
+  const legs = document.createElement('div');
+  legs.className = 'jc-legs';
+  const marks = new Map((v.legs ?? []).map((l) => [l.matchId, l.hit]));
+  for (const leg of t.legs ?? []) {
+    const row2 = document.createElement('div');
+    row2.className = 'jc-leg';
+    const mark = marks.get(leg.matchId);
+    if (mark === 'hit') row2.classList.add('ok');
+    if (mark === 'miss') row2.classList.add('no');
+
+    const main = document.createElement('div');
+    main.className = 'jc-leg-main';
+    const title = document.createElement('strong');
+    title.textContent = `${leg.matchNum || leg.matchId} ${leg.home} vs ${leg.away}`;
+    const detail = document.createElement('span');
+    detail.className = 'muted small';
+    detail.textContent = `${MARKET_NAMES[leg.market] ?? leg.market} ${leg.line != null ? leg.line : ''} ${selName(leg.market, leg.selection)} @${leg.sp}`;
+    main.append(title, detail);
+
+    const state2 = document.createElement('span');
+    state2.className = 'mark';
+    state2.textContent = mark === 'hit' ? '中' : mark === 'miss' ? '错' : '待';
+    row2.append(main, state2);
+    legs.append(row2);
+  }
+
+  const verdict = document.createElement('div');
+  if (v.pending) {
+    verdict.className = 'verdict pend';
+    verdict.textContent = `待结算（${v.reason}）`;
+  } else if (v.level === 0) {
+    verdict.className = 'verdict miss';
+    verdict.textContent = `未中 · ${v.bets ?? 0} 注`;
+  } else {
+    verdict.className = 'verdict hit';
+    verdict.textContent = `中 ${v.bets} 注 · ${v.amount} 元`;
+  }
+
+  const foot = document.createElement('div');
+  foot.className = 'entry-foot';
+  const spent = document.createElement('span');
+  spent.textContent = `花 ${cost} 元`;
+  const net = document.createElement('span');
+  net.textContent = v.amount ? `收 ${v.amount} 元` : '';
+  foot.append(spent, net);
+
+  el.append(top, legs, verdict, foot);
+  return el;
+}
 
 function entryEl(row) {
   const { ticket: t, verdict: v, cost } = row;
+  if (kindOf(t) === 'parlay') return parlayEl(row);
   const el = document.createElement('article');
   el.className = `entry${v.level > 0 ? ' hit' : ''}`;
 
@@ -258,7 +623,7 @@ async function refresh() {
       const draws = await repo.loadDraw(date);
       const d = draws.find((x) => x.game === r.ticket.game && x.status === 'ok');
       if (d) {
-        drawCache.set(r.verdict, new Set([...d.red, ...d.blue]));
+        drawCache.set(r.verdict, new Set([...(d.red ?? []), ...(d.blue ?? [])]));
         break;
       }
     }
@@ -293,10 +658,21 @@ document.querySelectorAll('.seg').forEach((b) =>
     state.game = b.dataset.game;
     state.red = [];
     state.blue = [];
+    state.legs = [];
+    applyMode();
     renderGrids();
     hint('');
   }),
 );
+
+$('#btn-pick-match').addEventListener('click', () => openMatches(true));
+$('#btn-match-close').addEventListener('click', () => openMatches(false));
+
+$('#jc-pass').addEventListener('change', (e) => {
+  state.passType = e.currentTarget.value;
+  renderJc();
+});
+$('#jc-multiple').addEventListener('input', renderJc);
 
 $('#btn-added').addEventListener('click', (e) => {
   state.added = !state.added;

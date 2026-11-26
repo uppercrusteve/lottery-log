@@ -44,27 +44,51 @@
         <div class="segmented" role="tablist" aria-label="彩种">
           <button class="seg is-on" data-game="ssq" role="tab" aria-selected="true">双色球</button>
           <button class="seg" data-game="dlt" role="tab" aria-selected="false">大乐透</button>
+          <button class="seg" data-game="jcf" role="tab" aria-selected="false">足球</button>
+          <button class="seg" data-game="jcb" role="tab" aria-selected="false">篮球</button>
         </div>
 
         <label class="field">
-          <span class="label">购买日期</span>
+          <span class="label" id="date-label">购买日期</span>
           <input id="in-date" type="date" value="" />
         </label>
 
-        <div class="pick">
-          <div class="pick-head">
-            <span class="label" id="red-label">红球 <em>选 6</em></span>
-            <span class="counter" id="red-count">0 / 6</span>
+        <div class="only-number">
+          <div class="pick">
+            <div class="pick-head">
+              <span class="label" id="red-label">红球 <em>选 6</em></span>
+              <span class="counter" id="red-count">0 / 6</span>
+            </div>
+            <div class="grid" id="red-grid" role="group" aria-labelledby="red-label"></div>
           </div>
-          <div class="grid" id="red-grid" role="group" aria-labelledby="red-label"></div>
+
+          <div class="pick">
+            <div class="pick-head">
+              <span class="label" id="blue-label">蓝球 <em>选 1</em></span>
+              <span class="counter" id="blue-count">0 / 1</span>
+            </div>
+            <div class="grid" id="blue-grid" role="group" aria-labelledby="blue-label"></div>
+          </div>
         </div>
 
-        <div class="pick">
-          <div class="pick-head">
-            <span class="label" id="blue-label">蓝球 <em>选 1</em></span>
-            <span class="counter" id="blue-count">0 / 1</span>
+        <div class="only-parlay" hidden>
+          <div class="jc-bar">
+            <button id="btn-pick-match" class="ghost" type="button">选比赛</button>
+            <span class="muted" id="jc-count">0 场</span>
           </div>
-          <div class="grid" id="blue-grid" role="group" aria-labelledby="blue-label"></div>
+          <div id="jc-legs" class="jc-legs"></div>
+
+          <div class="row2">
+            <label class="field">
+              <span class="label">过关方式</span>
+              <select id="jc-pass"></select>
+            </label>
+            <label class="field">
+              <span class="label">倍数</span>
+              <input id="jc-multiple" type="number" inputmode="numeric" min="1" step="1" value="1" />
+            </label>
+          </div>
+          <p class="hint" id="jc-sum"></p>
         </div>
 
         <div class="row2">
@@ -72,7 +96,7 @@
             <span class="label">金额（元）</span>
             <input id="in-stake" type="number" inputmode="decimal" min="2" step="1" value="2" />
           </label>
-          <label class="field">
+          <label class="field only-number">
             <span class="label">倍数</span>
             <input id="in-multiple" type="number" inputmode="numeric" min="1" step="1" value="1" />
           </label>
@@ -83,8 +107,8 @@
         </div>
 
         <div class="quick">
-          <button id="btn-random" class="ghost" type="button">机选</button>
-          <button id="btn-repeat" class="ghost" type="button">照上次</button>
+          <button id="btn-random" class="ghost only-number" type="button">机选</button>
+          <button id="btn-repeat" class="ghost only-number" type="button">照上次</button>
           <button id="btn-save" class="primary" type="button">记一笔</button>
         </div>
         <p class="hint" id="entry-hint"></p>
@@ -98,6 +122,16 @@
     </main>
 
     <div class="sheet-scrim" id="scrim" hidden></div>
+
+    <aside class="sheet glass" id="match-sheet" hidden aria-label="选比赛">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <h2>选比赛</h2>
+      <p class="muted small" id="match-hint">赛程由 Actions 每天抓，读的是数据仓里的备份。</p>
+      <div id="match-list" class="match-list"></div>
+      <div class="quick">
+        <button id="btn-match-close" class="ghost" type="button">关</button>
+      </div>
+    </aside>
     <aside class="sheet glass" id="settings" hidden aria-label="设置">
       <div class="sheet-handle" aria-hidden="true"></div>
       <h2>连接数据仓</h2>
