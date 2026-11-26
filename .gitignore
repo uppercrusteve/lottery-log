@@ -15,3 +15,6 @@ android/.idea/
 *.apk
 *.local
 .DS_Store
+
+# release 临时说明
+.release-notes.md

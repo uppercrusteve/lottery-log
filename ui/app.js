@@ -198,13 +198,14 @@ function entryEl(row) {
 
   const nums = document.createElement('div');
   nums.className = 'nums';
-  const draw = v.pending ? null : true;
-  for (const n of t.red) nums.append(ball(n, 'r', v.pending ? false : hitRed(v, n, t)));
+  // 命中才染色，待开奖一律不染
+  const hit = (n) => !v.pending && drawCache.get(v)?.has(n) === true;
+  for (const n of t.red) nums.append(ball(n, 'r', hit(n)));
   const sep = document.createElement('span');
   sep.className = 'muted';
   sep.textContent = '+';
   nums.append(sep);
-  for (const n of t.blue) nums.append(ball(n, 'b', false));
+  for (const n of t.blue) nums.append(ball(n, 'b', hit(n)));
 
   const verdict = document.createElement('div');
   if (v.pending) {
@@ -227,7 +228,6 @@ function entryEl(row) {
   foot.append(spent, net);
 
   el.append(top, nums, verdict, foot);
-  void draw;
   return el;
 }
 
@@ -239,13 +239,11 @@ function ball(n, kind, on) {
   return s;
 }
 
-// 判定结果里没有逐号命中信息，这里按开奖号重算一次用于染色
-const drawCache = new Map();
-function hitRed(v, _n, _t) {
-  return v.redHit > 0 && drawCache.get(v)?.has(_n) === true;
-}
+// 判定结果里没有逐号命中信息，这里按开奖号集合重新算一次用于染色
+export const drawCache = new Map();
 
 async function refresh() {
+  drawCache.clear();
   let rows = [];
   try {
     rows = await repo.timeline();
